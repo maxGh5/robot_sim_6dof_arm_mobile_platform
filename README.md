@@ -76,7 +76,6 @@ graph TD
     linkStyle 11 stroke-width:2px,fill:none,stroke:orange;
     linkStyle 12 stroke-width:2px,fill:none,stroke:blue;
 ```
-!['wiring diagram'](img/wiring_diagram.png)
 ---
 
 ### 2. Detailed Pinout Connections
