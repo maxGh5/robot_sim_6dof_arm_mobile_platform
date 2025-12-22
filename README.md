@@ -136,7 +136,7 @@ Since I cannot generate an image file, visualize the layout as follows:
 2. **Install Dependencies:**
 * Open Arduino IDE.
 * Go to `Sketch` -> `Include Library` -> `Manage Libraries...`
-* Search for **"AlfredoCRSF"** and install it.
+* Search for **"AlfredoCRSF"** and **"ServoEasing"** and install it.
 * (The standard `Servo` library is pre-installed).
 
 3. **Flash the Code:**
