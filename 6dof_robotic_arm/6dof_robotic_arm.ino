@@ -15,18 +15,19 @@
 #define CRSF_BAUDRATE 420000
 
 // Pin Definitions
-const int PIN_WAIST     = 2;
-const int PIN_SHOULDER  = 3;
-const int PIN_ELBOW     = 4;
-const int PIN_WRIST_P   = 5;
-const int PIN_WRIST_R   = 6;
-const int PIN_GRIPPER   = 7;
+const int PIN_WAIST      = 2;
+const int PIN_SHOULDER_1 = 3;
+const int PIN_SHOULDER_2 = 4; // Secondary Shoulder Servo (Opposite Direction)
+const int PIN_ELBOW      = 5;
+const int PIN_WRIST_P    = 6;
+const int PIN_WRIST_R    = 7;
+const int PIN_GRIPPER    = 8;
 
 // Base Motor Pins
-const int PIN_LEFT_PWM  = 8;
-const int PIN_LEFT_DIR  = 9;
-const int PIN_RIGHT_PWM = 10;
-const int PIN_RIGHT_DIR = 11;
+const int PIN_LEFT_PWM   = 9;
+const int PIN_LEFT_DIR   = 10;
+const int PIN_RIGHT_PWM  = 11;
+const int PIN_RIGHT_DIR  = 12;
 
 // --- Tuning ---
 // Speed is in Degrees per Second. 
@@ -37,7 +38,8 @@ const int GRIPPER_SPEED = 200;
 // --- Objects ---
 AlfredoCRSF crsf;
 ServoEasing sWaist;
-ServoEasing sShoulder;
+ServoEasing sShoulder1;
+ServoEasing sShoulder2; // Added secondary shoulder servo object
 ServoEasing sElbow;
 ServoEasing sWristP;
 ServoEasing sWristR;
@@ -54,17 +56,19 @@ void setup() {
 
   // 1. Attach Servos with Initial Angles
   // attach(pin, start_angle)
-  sWaist.attach(PIN_WAIST, 90);
-  sShoulder.attach(PIN_SHOULDER, 90);
-  sElbow.attach(PIN_ELBOW, 90);
-  sWristP.attach(PIN_WRIST_P, 90);
-  sWristR.attach(PIN_WRIST_R, 90);
+  sWaist.attach(PIN_WAIST, 90);    // 90 = Middle (Facing Back/Driven Wheels)
+  sShoulder1.attach(PIN_SHOULDER_1, 10); // Sim -80 -> Servo 10
+  sShoulder2.attach(PIN_SHOULDER_2, 170); // 180 - 10 = 170
+  sElbow.attach(PIN_ELBOW, 160);    // Sim 160 -> Servo 160
+  sWristP.attach(PIN_WRIST_P, 100); // Sim 10 -> Servo 100 (90+10)
+  sWristR.attach(PIN_WRIST_R, 180); // Sim 90 -> Servo 180 (90+90)
   sGripper.attach(PIN_GRIPPER, 0);
 
   // 2. Configure Smoothing
   // EASE_CUBIC_IN_OUT gives a nice "Slow Start -> Fast -> Slow Stop" motion
   sWaist.setEasingType(EASE_CUBIC_IN_OUT);
-  sShoulder.setEasingType(EASE_CUBIC_IN_OUT);
+  sShoulder1.setEasingType(EASE_CUBIC_IN_OUT);
+  sShoulder2.setEasingType(EASE_CUBIC_IN_OUT);
   sElbow.setEasingType(EASE_CUBIC_IN_OUT);
   sWristP.setEasingType(EASE_CUBIC_IN_OUT);
   sWristR.setEasingType(EASE_CUBIC_IN_OUT);
@@ -80,7 +84,7 @@ void setup() {
   pinMode(PIN_RIGHT_PWM, OUTPUT);
   pinMode(PIN_RIGHT_DIR, OUTPUT);
   
-  Serial.println("Robot Initialized with ServoEasing.");
+  Serial.println("Robot Initialized with ServoEasing (Dual Shoulder Config).");
 }
 
 void loop() {
@@ -108,9 +112,14 @@ void loop() {
     int angleWaist = map(chWaist, 1000, 2000, 0, 180);
     if (sWaist.getCurrentAngle() != angleWaist) sWaist.startEaseTo(angleWaist);
 
-    // Shoulder
-    int angleShoulder = map(chShoulder, 1000, 2000, 45, 135); // Limited range
-    if (sShoulder.getCurrentAngle() != angleShoulder) sShoulder.startEaseTo(angleShoulder);
+    // Shoulder (Dual Servo Sync)
+    int angleShoulder = map(chShoulder, 1000, 2000, 0, 180); // Full range
+    int angleShoulder2 = 180 - angleShoulder; // Opposite direction for 2nd servo
+    
+    if (sShoulder1.getCurrentAngle() != angleShoulder) {
+      sShoulder1.startEaseTo(angleShoulder);
+      sShoulder2.startEaseTo(angleShoulder2);
+    }
 
     // Elbow
     int angleElbow = map(chElbow, 1000, 2000, 0, 180);
@@ -176,7 +185,8 @@ void stopBase() {
 // Helper to set speed for all arm joints
 void setSpeedForAllServos(int speed) {
   sWaist.setSpeed(speed);
-  sShoulder.setSpeed(speed);
+  sShoulder1.setSpeed(speed);
+  sShoulder2.setSpeed(speed); // Check logic: 180-angle needs same speed
   sElbow.setSpeed(speed);
   sWristP.setSpeed(speed);
   sWristR.setSpeed(speed);

@@ -20,6 +20,14 @@ This project implements the control system for [**RC Rover with Robot Arm 6 DOF*
 * **5V/6V High-Amp BEC:** To power the servos (Do NOT power servos from the Arduino).
 * **Battery:** LiPo battery appropriate for your motors (e.g., 2S or 3S).
 
+## Arduino IDE Setup
+
+In order to use the Arduino IDE, you need to add your user to the `dialout` group:
+```
+sudo usermod -a -G dialout $USER
+sudo reboot
+```
+
 ## 🔌 Wiring Guide
 
 ### ⚡ Critical Power Warning
