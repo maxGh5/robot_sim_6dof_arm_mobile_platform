@@ -14,8 +14,8 @@ This project implements the control system for [**RC Rover with Robot Arm 6 DOF*
 * **Microcontroller:** Arduino Mega 2560
 * **Radio Receiver:** RadioMaster Bandit BR1 (or compatible ExpressLRS receiver)
 * **Radio Transmitter:** Any EdgeTX/OpenTX radio (e.g., RadioMaster Zorro, TX16S)
-* **Motor Driver:** L298N, TB6612FNG, or similar dual H-Bridge driver for the base wheels.
-* **Servos:** 6x RC Servos (High torque recommended for Shoulder/Elbow).
+* **Motor Driver:** Dual H-Bridge driver compatible with PWM/DIR (e.g. customized L298N w/ inverter or Sabertooth).
+* **Servos:** 7x RC Servos (Dual servos for Shoulder).
 * **Power Supply:**
 * **5V/6V High-Amp BEC:** To power the servos (Do NOT power servos from the Arduino).
 * **Battery:** LiPo battery appropriate for your motors (e.g., 2S or 3S).
@@ -95,18 +95,19 @@ graph TD
 * **TX Pin**  Arduino **Pin 19 (RX1)**
 * **RX Pin**  Arduino **Pin 18 (TX1)** *(Optional, only needed if you want telemetry sent back to the radio)*
 
-#### B. Arm Servos (6x)
+#### B. Arm Servos (7x)
 
-Connect the **Signal (Yellow/Orange)** wire of each servo to the Arduino. Connect the **Power (Red)** and **Ground (Brown/Black)** to your external power rail (Breadboard/terminal strip).
+Connect the **Signal (Yellow/Orange)** wire of each servo to the Arduino.
 
 | Servo Joint | Arduino Pin |
 | --- | --- |
 | **Waist (J1)** | Pin **2** |
-| **Shoulder (J2)** | Pin **3** |
-| **Elbow (J3)** | Pin **4** |
-| **Wrist Pitch (J5)** | Pin **5** |
-| **Wrist Roll (J6)** | Pin **6** |
-| **Gripper** | Pin **7** |
+| **Shoulder Left (J2)** | Pin **3** |
+| **Shoulder Right (J2)** | Pin **4** |
+| **Elbow (J3)** | Pin **5** |
+| **Wrist Pitch (J5)** | Pin **6** |
+| **Wrist Roll (J6)** | Pin **7** |
+| **Gripper** | Pin **8** |
 
 #### C. Motor Driver (Example: L298N)
 
@@ -144,7 +145,7 @@ Since I cannot generate an image file, visualize the layout as follows:
 2. **Install Dependencies:**
 * Open Arduino IDE.
 * Go to `Sketch` -> `Include Library` -> `Manage Libraries...`
-* Search for **"AlfredoCRSF"** and **"ServoEasing"** and install it.
+* Search for **"AlfredoCRSF"**, **"ServoEasing"**, and **"ArduinoJson"** and install them.
 * (The standard `Servo` library is pre-installed).
 
 3. **Flash the Code:**
@@ -178,15 +179,43 @@ These mappings depend on your specific radio transmitter setup (Mixer), but the 
 
 To change pins or adjust speed/angles, look at the top of the script:
 
-```cpp
-// --- Pin Definitions ---
-const int PIN_WAIST     = 2;
-// ... change as needed
+```
 
-// --- Control Logic ---
-// Inside controlArm():
-sWaist.write(map(chWaist, 1000, 2000, 0, 180)); 
-// Change 0, 180 to limit travel (e.g., 45, 135)
+## 💻 Computer Control (Simulation & USB)
 
+This project includes a **Web Simulation** (`6dof_robotic_arm.html`) that allows you to control the robot via USB Serial using JSON commands.
 
+### How to Use
+
+1. **Upload Code:** Ensure `6dof_robotic_arm.ino` is running on the Mega.
+2. **Open Simulation:** Open `6dof_robotic_arm.html` in a Chrome/Edge browser.
+3. **Connect:** Click the **Connect to Robot** button and select the Arduino's COM port.
+4. **Control:**
+    * Use the **Radio Buttons** to select the target:
+        * **Send to USB:** Sends the command to the physical robot.
+        * **Apply to Sim:** Animates the simulation to preview the move.
+    * Use the **JSON Control** panel to send commands.
+
+### JSON Command Format
+
+You can control Servos and Motors. Fields are optional (omitted fields remain unchanged).
+
+**Example Command:**
+```json
+{
+  "servos": {
+    "waist": 90,       // Angle (deg)
+    "shoulder": 45,    // Angle (deg)
+    "elbow": 160,      // Angle (deg)
+    "wristP": 90,      // Angle (deg)
+    "wristR": 90,      // Angle (deg)
+    "gripper": 0,      // 0-100 (Open/Close)
+    "speed": 60        // Speed (deg/sec)
+  },
+  "motors": {
+    "left": 255,       // Speed (-255 to 255)
+    "right": 255,      // Speed (-255 to 255)
+    "duration": 1000   // Duration (ms)
+  }
+}
 ```
