@@ -1,13 +1,6 @@
-/*
- * Design A - Smooth Robot Control (ServoEasing + CRSF)
- * Hardware: Arduino Mega 2560 + RadioMaster BR1
- * * DEPENDENCIES:
- * 1. AlfredoCRSF (Manage Libraries -> "AlfredoCRSF")
- * 2. ServoEasing (Manage Libraries -> "ServoEasing")
- */
-
 #include <AlfredoCRSF.h>
 #include <ServoEasing.hpp> // Note the .hpp extension for this library
+#include <Servo.h>         // Explicitly include Servo for direct control
 #include <ArduinoJson.h>
 
 // --- Configuration ---
@@ -35,13 +28,20 @@ const int PIN_RIGHT_DIR  = 12;
 // Lower = Smoother/Heavier feel. Higher = Snappier.
 const int ARM_SPEED = 90;      
 const int GRIPPER_SPEED = 200; 
+const float SENSITIVITY = 0.005; // 0.005 * 500 = 2.5 deg/loop (Fast)
+const float ELBOW_SENSITIVITY = 0.0001; // Slower for direct Servo control
+const float SHOULDER_SENSITIVITY = 0.0002; // Slower for heavy shoulder
+const int DEADZONE = 30;
+
+// State Variables for Relative Control
+float tWaist, tShoulder, tElbow, tWristP, tWristR, tGripper; 
 
 // --- Objects ---
 AlfredoCRSF crsf;
 ServoEasing sWaist;
-ServoEasing sShoulder1;
-ServoEasing sShoulder2; // Added secondary shoulder servo object
-ServoEasing sElbow;
+Servo sShoulder1; // CHANGED: Direct Servo
+Servo sShoulder2; // CHANGED: Direct Servo
+Servo sElbow; 
 ServoEasing sWristP;
 ServoEasing sWristR;
 ServoEasing sGripper;
@@ -57,20 +57,31 @@ void setup() {
 
   // 1. Attach Servos with Initial Angles
   // attach(pin, start_angle)
-  sWaist.attach(PIN_WAIST, 90);    // 90 = Middle (Facing Back/Driven Wheels)
-  sShoulder1.attach(PIN_SHOULDER_1, 10); // Sim -80 -> Servo 10
-  sShoulder2.attach(PIN_SHOULDER_2, 170); // 180 - 10 = 170
-  sElbow.attach(PIN_ELBOW, 160);    // Sim 160 -> Servo 160
-  sWristP.attach(PIN_WRIST_P, 100); // Sim 10 -> Servo 100 (90+10)
-  sWristR.attach(PIN_WRIST_R, 180); // Sim 90 -> Servo 180 (90+90)
-  sGripper.attach(PIN_GRIPPER, 0);
+  sWaist.attach(PIN_WAIST, 90);    tWaist = 90;
+  
+  // Shoulder Direct Config
+  sShoulder1.attach(PIN_SHOULDER_1);
+  sShoulder2.attach(PIN_SHOULDER_2);
+  tShoulder = 180;
+  sShoulder1.write((int)tShoulder);
+  sShoulder2.write(180 - (int)tShoulder);
+
+  
+  // Elbow Direct Config
+  sElbow.attach(PIN_ELBOW); 
+  sElbow.write(180);
+  tElbow = 180;
+
+  sWristP.attach(PIN_WRIST_P, 100); tWristP = 100;
+  sWristR.attach(PIN_WRIST_R, 180); tWristR = 180;
+  sGripper.attach(PIN_GRIPPER, 0);  tGripper = 0;
 
   // 2. Configure Smoothing
   // EASE_CUBIC_IN_OUT gives a nice "Slow Start -> Fast -> Slow Stop" motion
   sWaist.setEasingType(EASE_CUBIC_IN_OUT);
-  sShoulder1.setEasingType(EASE_CUBIC_IN_OUT);
-  sShoulder2.setEasingType(EASE_CUBIC_IN_OUT);
-  sElbow.setEasingType(EASE_CUBIC_IN_OUT);
+  // sShoulder1.setEasingType(EASE_CUBIC_IN_OUT); // Direct
+  // sShoulder2.setEasingType(EASE_CUBIC_IN_OUT); // Direct
+  // sElbow.setEasingType(EASE_CUBIC_IN_OUT); // Removed for direct control
   sWristP.setEasingType(EASE_CUBIC_IN_OUT);
   sWristR.setEasingType(EASE_CUBIC_IN_OUT);
   sGripper.setEasingType(EASE_LINEAR); // Grippers usually want linear response
@@ -85,7 +96,7 @@ void setup() {
   pinMode(PIN_RIGHT_PWM, OUTPUT);
   pinMode(PIN_RIGHT_DIR, OUTPUT);
   
-  Serial.println("Robot Initialized with ServoEasing (Dual Shoulder Config).");
+  Serial.println("Robot Initialized (Elbow & Shoulder using Standard Servo).");
 }
 
 void loop() {
@@ -100,43 +111,55 @@ void loop() {
     chShoulder = crsf.getChannel(2);
     chDrive    = crsf.getChannel(3);
     chTurn     = crsf.getChannel(1); // Mapped to Ch1 (Aileron/Right Stick X)
-    chElbow    = crsf.getChannel(5);
-    chWristP   = crsf.getChannel(6);
+    chElbow    = crsf.getChannel(6); // Swapped to Ch6 (Pot?)
+    chWristP   = crsf.getChannel(5); // Swapped to Ch5 (Switch?)
     chWristR   = crsf.getChannel(7);
     chGripper  = crsf.getChannel(8);
 
-    // --- Arm Control (Non-Blocking) ---
-    // startEaseTo() tells the library to calculate the curve to the new target.
-    // It runs in the background using interrupts/timers.
-    
-    // Waist
-    int angleWaist = map(chWaist, 1000, 2000, 0, 180);
-    if (sWaist.getCurrentAngle() != angleWaist) sWaist.startEaseTo(angleWaist);
-
-    // Shoulder (Dual Servo Sync)
-    int angleShoulder = map(chShoulder, 1000, 2000, 0, 180); // Full range
-    int angleShoulder2 = 180 - angleShoulder; // Opposite direction for 2nd servo
-    
-    if (sShoulder1.getCurrentAngle() != angleShoulder) {
-      sShoulder1.startEaseTo(angleShoulder);
-      sShoulder2.startEaseTo(angleShoulder2);
+    // DEBUG: Elbow & Shoulder
+    static unsigned long lastPrint = 0;
+    if (millis() - lastPrint > 200) { // Print 5 times/sec
+      lastPrint = millis();
+      Serial.print("Elbow: "); Serial.print(tElbow);
+      Serial.print(" | Shou: "); Serial.println(tShoulder);
     }
 
-    // Elbow
-    int angleElbow = map(chElbow, 1000, 2000, 0, 180);
-    if (sElbow.getCurrentAngle() != angleElbow) sElbow.startEaseTo(angleElbow);
+    // --- Arm Control (Relative/Rate) ---
+    // Update target angles based on joystick deflection
+    
+    // Waist
+    if (abs(chWaist - 1500) > DEADZONE) tWaist += (chWaist - 1500) * SENSITIVITY;
+    tWaist = constrain(tWaist, 0, 180);
+    if (sWaist.getCurrentAngle() != (int)tWaist) sWaist.startEaseTo((int)tWaist);
+
+    // Shoulder - Direct Write
+    if (abs(chShoulder - 1500) > DEADZONE) tShoulder += (chShoulder - 1500) * SHOULDER_SENSITIVITY;
+    tShoulder = constrain(tShoulder, 0, 180);                                                 
+    // Write to both servos, inversely
+    sShoulder1.write((int)tShoulder);
+    sShoulder2.write(180 - (int)tShoulder);
+
+    // Elbow - Direct Write
+    if (abs(chElbow - 1500) > DEADZONE) tElbow += (chElbow - 1500) * ELBOW_SENSITIVITY;
+    tElbow = constrain(tElbow, 0, 180);
+    // Since we are not easing, we write directly. 
+    // To smooth it slightly, the relative update rate IS the smoothing.
+    sElbow.write((int)tElbow);
 
     // Wrist Pitch
-    int angleWristP = map(chWristP, 1000, 2000, 0, 180);
-    if (sWristP.getCurrentAngle() != angleWristP) sWristP.startEaseTo(angleWristP);
+    if (abs(chWristP - 1500) > DEADZONE) tWristP += (chWristP - 1500) * SENSITIVITY;
+    tWristP = constrain(tWristP, 0, 180);
+    if (sWristP.getCurrentAngle() != (int)tWristP) sWristP.startEaseTo((int)tWristP);
 
     // Wrist Roll
-    int angleWristR = map(chWristR, 1000, 2000, 0, 180);
-    if (sWristR.getCurrentAngle() != angleWristR) sWristR.startEaseTo(angleWristR);
+    if (abs(chWristR - 1500) > DEADZONE) tWristR += (chWristR - 1500) * SENSITIVITY;
+    tWristR = constrain(tWristR, 0, 180);
+    if (sWristR.getCurrentAngle() != (int)tWristR) sWristR.startEaseTo((int)tWristR);
 
-    // Gripper
-    int angleGrip = (chGripper > 1500) ? 90 : 0;
-    if (sGripper.getCurrentAngle() != angleGrip) sGripper.startEaseTo(angleGrip);
+    // Gripper (Keep absolute toggle-like or Rate? Let's use Rate for precision)
+    if (abs(chGripper - 1500) > DEADZONE) tGripper += (chGripper - 1500) * SENSITIVITY;
+    tGripper = constrain(tGripper, 0, 90); // Gripper usually 0-90
+    if (sGripper.getCurrentAngle() != (int)tGripper) sGripper.startEaseTo((int)tGripper);
 
     // --- Base Control (Standard PWM) ---
     controlMobileBase(chDrive, chTurn);
@@ -164,8 +187,8 @@ void controlMobileBase(int throttle, int steering) {
   if (abs(speedFwd) < 20) speedFwd = 0;
   if (abs(speedTurn) < 20) speedTurn = 0;
 
-  int leftSpeed = speedFwd + speedTurn;
-  int rightSpeed = speedFwd - speedTurn;
+  int leftSpeed = speedFwd - speedTurn;
+  int rightSpeed = speedFwd + speedTurn;
 
   leftSpeed = constrain(leftSpeed, -255, 255);
   rightSpeed = constrain(rightSpeed, -255, 255);
@@ -176,25 +199,32 @@ void controlMobileBase(int throttle, int steering) {
 
 void setMotor(int pinPWM, int pinDir, int speed) {
   if (speed > 0) {
-    digitalWrite(pinDir, HIGH);
-    analogWrite(pinPWM, speed);
-  } else {
+    // Forward (Stick Up) - Normal Logic
+    // Based on testing: DIR=LOW is Forward, PWM 255 is Fast.
     digitalWrite(pinDir, LOW);
-    analogWrite(pinPWM, abs(speed));
+    analogWrite(pinPWM, speed); 
+  } else {
+    // Backward (Stick Down) - Inverted Logic
+    // Based on testing: DIR=HIGH is Backward, PWM 0 is Fast (255 is Stop).
+    digitalWrite(pinDir, HIGH);
+    analogWrite(pinPWM, 255 - abs(speed));
   }
 }
 
 void stopBase() {
-  analogWrite(PIN_LEFT_PWM, 0);
-  analogWrite(PIN_RIGHT_PWM, 0);
+  // Safe Stop: DIR=HIGH (Inverted) + PWM 255 (Stop)
+  digitalWrite(PIN_LEFT_DIR, HIGH);
+  digitalWrite(PIN_RIGHT_DIR, HIGH);
+  analogWrite(PIN_LEFT_PWM, 255);
+  analogWrite(PIN_RIGHT_PWM, 255);
 }
 
 // Helper to set speed for all arm joints
 void setSpeedForAllServos(int speed) {
   sWaist.setSpeed(speed);
-  sShoulder1.setSpeed(speed);
-  sShoulder2.setSpeed(speed); // Check logic: 180-angle needs same speed
-  sElbow.setSpeed(speed);
+  // sShoulder1.setSpeed(speed);
+  // sShoulder2.setSpeed(speed); 
+  // sElbow.setSpeed(speed);
   sWristP.setSpeed(speed);
   sWristR.setSpeed(speed);
   sWristP.setSpeed(speed);
@@ -218,19 +248,19 @@ void processJSON() {
     
     // Check for speed first
     if (servos.containsKey("speed")) {
-       setSpeedForAllServos(servos["speed"]);
+       setSpeedForAllServos(servos["speed"].as<int>());
     }
 
-    if (servos.containsKey("waist"))    sWaist.startEaseTo(servos["waist"]);
+    if (servos.containsKey("waist"))    { tWaist = servos["waist"].as<int>(); sWaist.startEaseTo((int)tWaist); }
     if (servos.containsKey("shoulder")) {
-      int angle = servos["shoulder"];
-      sShoulder1.startEaseTo(angle);
-      sShoulder2.startEaseTo(180 - angle);
+      tShoulder = servos["shoulder"].as<int>();
+      sShoulder1.write((int)tShoulder); 
+      sShoulder2.write(180 - (int)tShoulder);
     }
-    if (servos.containsKey("elbow"))    sElbow.startEaseTo(servos["elbow"]);
-    if (servos.containsKey("wristP"))   sWristP.startEaseTo(servos["wristP"]);
-    if (servos.containsKey("wristR"))   sWristR.startEaseTo(servos["wristR"]);
-    if (servos.containsKey("gripper"))  sGripper.startEaseTo(servos["gripper"]);
+    if (servos.containsKey("elbow"))    { tElbow = servos["elbow"].as<int>(); sElbow.write((int)tElbow); } // Direct
+    if (servos.containsKey("wristP"))   { tWristP = servos["wristP"].as<int>(); sWristP.startEaseTo((int)tWristP); }
+    if (servos.containsKey("wristR"))   { tWristR = servos["wristR"].as<int>(); sWristR.startEaseTo((int)tWristR); }
+    if (servos.containsKey("gripper"))  { tGripper = servos["gripper"].as<int>(); sGripper.startEaseTo((int)tGripper); }
   }
 
   // --- Process Motors ---
